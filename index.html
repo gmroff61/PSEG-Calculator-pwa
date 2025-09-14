@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>kWh Cost Calculator</title>
+
+  <!-- PWA meta -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0f1115" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+
+  <style>
+    :root { --bg:#0f1115; --card:#171a22; --ink:#ffffff; --muted:#aab3c5; --accent:#3d7bfd; --ok:#2ecc71; --warn:#ffb020; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100svh; padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+      display: grid; place-items: start center;
+    }
+    main { width: min(900px, 96vw); display: grid; gap: 16px; }
+    h1 { margin: 8px 0 0; font-size: clamp(20px, 3.4vw, 28px); }
+    p.hint { margin: 0; color: var(--muted); }
+    .card { background: var(--card); border-radius: 16px; padding: 16px; box-shadow: 0 1px 0 #0a0c11 inset, 0 10px 24px rgba(0,0,0,.35); }
+    .row { display: grid; gap: 12px; grid-template-columns: 1fr; }
+    @media (min-width: 720px) { .row { grid-template-columns: 1fr 1fr; } }
+    .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
+    .field { display: grid; gap: 6px; }
+    label { font-size: 14px; color: var(--muted); }
+    input[type="number"] {
+      width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid #2a2f3c;
+      background: #121722; color: var(--ink); font-size: 16px; -webkit-appearance: none; appearance: none;
+    }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .tbl-wrap { overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    thead th {
+      text-align: left; font-weight: 600; font-size: 13px; color: var(--muted);
+      padding: 8px 8px; border-bottom: 1px solid #2a2f3c; position: sticky; top: 0; background: var(--card);
+    }
+    tbody td { padding: 10px 8px; border-bottom: 1px dashed #23293a; }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody input[type="number"] { padding: 10px 12px; font-size: 15px; }
+    tfoot td { padding: 10px 8px; }
+    .right { text-align: right; }
+    .muted { color: var(--muted); }
+    .pill { display: inline-block; padding: 6px 10px; border-radius: 999px; background: #121722; border: 1px solid #2a2f3c; font-size: 13px; color: var(--muted); }
+    .summary { display: grid; gap: 12px; grid-template-columns: 1fr; }
+    @media (min-width: 720px) { .summary { grid-template-columns: repeat(4, 1fr); } }
+    .metric { background:#121722; border:1px solid #2a2f3c; border-radius:14px; padding:12px; min-height:84px; display:grid; align-content:center; gap:4px; }
+    .metric .label { font-size: 12px; color: var(--muted); }
+    .metric .value { font-size: clamp(18px, 3.4vw, 24px); }
+    .metric.good .value { color: var(--ok); }
+    .metric.warn .value { color: var(--warn); }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    button { appearance: none; border: 0; border-radius: 12px; padding: 12px 14px; cursor: pointer; font-weight: 600; background: var(--accent); color: white; box-shadow: 0 2px 0 #243e8f inset; }
+    button.secondary { background: #2a2f3c; color: var(--ink); box-shadow: none; }
+    .footer-note { color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>kWh Cost Calculator</h1>
+      <p class="hint">Enter your average <strong>daily kWh</strong> for each month. We’ll multiply by the correct days per month (with leap years), sum the year, apply your <strong>$/kWh</strong> rate, then show annual cost and average monthly $.</p>
+    </header>
+
+    <section class="card">
+      <div class="controls">
+        <div class="field">
+          <label for="year">Year (for days per month & leap year)</label>
+          <input id="year" type="number" inputmode="numeric" min="1900" max="9999">
+        </div>
+        <div class="field">
+          <label for="rate">$/kWh (e.g., 0.24)</label>
+          <input id="rate" type="number" inputmode="decimal" step="0.0001" min="0" placeholder="0.24">
+        </div>
+      </div>
+    </section>
+
+    <section class="card tbl-wrap" aria-label="Monthly inputs">
+      <table>
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th class="right">Days</th>
+            <th class="right">Daily kWh</th>
+            <th class="right">Monthly kWh</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3" class="right muted">Annual kWh total</td>
+            <td class="right"><span class="pill" id="annualKWh">0</span></td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+
+    <section class="card">
+      <div class="summary">
+        <div class="metric">
+          <div class="label">Annual kWh</div>
+          <div class="value" id="sumKWh">0</div>
+        </div>
+        <div class="metric">
+          <div class="label">$/kWh</div>
+          <div class="value" id="rateOut">$0.0000</div>
+        </div>
+        <div class="metric warn">
+          <div class="label">Estimated Annual Cost</div>
+          <div class="value" id="annualCost">$0.00</div>
+        </div>
+        <div class="metric good">
+          <div class="label">Avg Monthly Cost</div>
+          <div class="value" id="avgMonthly">$0.00</div>
+        </div>
+      </div>
+      <div class="actions" style="margin-top:12px;">
+        <button id="clear">Reset</button>
+        <button class="secondary" id="export">Export CSV</button>
+      </div>
+      <p class="footer-note">Tip: on iPhone/iPad, open this site in Safari → Share → <em>Add to Home Screen</em> to install. Works offline after first load.</p>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+      const yearEl = document.getElementById('year');
+      const rateEl = document.getElementById('rate');
+      const tbody  = document.getElementById('tbody');
+
+      const annualKWhEl = document.getElementById('annualKWh');
+      const sumKWhEl    = document.getElementById('sumKWh');
+      const rateOutEl   = document.getElementById('rateOut');
+      const annualCostEl= document.getElementById('annualCost');
+      const avgMonthlyEl= document.getElementById('avgMonthly');
+
+      const clearBtn = document.getElementById('clear');
+      const exportBtn= document.getElementById('export');
+
+      // Build rows
+      const rowRefs = [];
+      months.forEach((m, i) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${m}</td>
+          <td class="right"><span class="pill days">30</span></td>
+          <td class="right"><input class="daily" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00"></td>
+          <td class="right"><span class="pill monthly">0</span></td>
+        `;
+        tbody.appendChild(tr);
+        rowRefs.push({
+          monthIndex: i,
+          daysEl: tr.querySelector('.days'),
+          dailyEl: tr.querySelector('.daily'),
+          monthlyEl: tr.querySelector('.monthly'),
+        });
+      });
+
+      function daysInMonth(year, monthIndex) { return new Date(year, monthIndex + 1, 0).getDate(); }
+      function fmtKWh(n){ return n.toLocaleString(undefined,{maximumFractionDigits:2,minimumFractionDigits:0}); }
+      function fmtMoney(n){ return n.toLocaleString(undefined,{style:'currency',currency:'USD'}); }
+      function clampYear(y){ if(!Number.isFinite(y)) return (new Date()).getFullYear(); return Math.min(9999, Math.max(1900, Math.round(y))); }
+
+      function recalc() {
+        const year = clampYear(Number(yearEl.value));
+        const rate = Math.max(0, Number(rateEl.value || 0));
+
+        rowRefs.forEach(ref => { ref.daysEl.textContent = daysInMonth(year, ref.monthIndex); });
+
+        let annualKWh = 0;
+        rowRefs.forEach(ref => {
+          const d = Number(ref.daysEl.textContent);
+          const daily = Math.max(0, Number(ref.dailyEl.value || 0));
+          const monthlyKWh = d * daily;
+          annualKWh += monthlyKWh;
+          ref.monthlyEl.textContent = fmtKWh(monthlyKWh);
+        });
+
+        annualKWhEl.textContent = fmtKWh(annualKWh);
+        sumKWhEl.textContent    = fmtKWh(annualKWh);
+        rateOutEl.textContent   = rate ? `$${rate.toFixed(4)}` : '$0.0000';
+
+        const annualCost = annualKWh * rate;
+        const avgMonthly = annualCost / 12;
+        annualCostEl.textContent = fmtMoney(annualCost || 0);
+        avgMonthlyEl.textContent = fmtMoney(avgMonthly || 0);
+
+        persist({ year, rate, daily: rowRefs.map(r => Number(r.dailyEl.value || '')) });
+      }
+
+      // persistence
+      const STORE_KEY = 'kwh-cost-calc:v1';
+      function persist(data){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch{} }
+      function restore(){
+        try{
+          const raw = localStorage.getItem(STORE_KEY); if(!raw) return;
+          const data = JSON.parse(raw);
+          if(data.year) yearEl.value = data.year;
+          if(Number.isFinite(data.rate)) rateEl.value = data.rate;
+          if(Array.isArray(data.daily)) rowRefs.forEach((r,i)=>{ if(Number.isFinite(data.daily[i])) r.dailyEl.value = data.daily[i]; });
+        }catch{}
+      }
+      function resetAll(){
+        yearEl.value = (new Date()).getFullYear(); rateEl.value = '';
+        rowRefs.forEach(r=>{ r.dailyEl.value=''; r.monthlyEl.textContent='0'; });
+        recalc();
+      }
+      function exportCSV(){
+        const year = clampYear(Number(yearEl.value));
+        const rate = Number(rateEl.value || 0);
+        const rows = [
+          ['Year', year],
+          ['Rate_$_per_kWh', rate],
+          [],
+          ['Month','Days','Daily_kWh','Monthly_kWh']
+        ];
+        rowRefs.forEach(ref=>{
+          const name = months[ref.monthIndex];
+          const days = Number(ref.daysEl.textContent);
+          const daily= Number(ref.dailyEl.value || 0);
+          const monthly = days * daily;
+          rows.push([name, days, daily, monthly]);
+        });
+        const annualKWh = rows.slice(4).reduce((acc,r)=>acc+Number(r[3]||0),0);
+        rows.push([]);
+        rows.push(['Annual_kWh', annualKWh]);
+        rows.push(['Annual_Cost_USD', annualKWh*rate]);
+        rows.push(['Avg_Monthly_Cost_USD', (annualKWh*rate)/12]);
+
+        const csv = rows.map(r=>r.map(cell=>{
+          const s = String(cell ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+        }).join(',')).join('\n');
+
+        const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href=url; a.download=`kwh-cost-${year}.csv`;
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      }
+
+      // events
+      yearEl.addEventListener('input', recalc);
+      rateEl.addEventListener('input', recalc);
+      rowRefs.forEach(r => r.dailyEl.addEventListener('input', recalc));
+      document.getElementById('clear').addEventListener('click', ()=>{ localStorage.removeItem(STORE_KEY); resetAll(); });
+      document.getElementById('export').addEventListener('click', exportCSV);
+
+      // init
+      (function init(){
+        yearEl.value = (new Date()).getFullYear();
+        restore();
+        recalc();
+      })();
+
+      // PWA: register service worker
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js').catch(console.error);
+      }
+    })();
+  </script>
+</body>
+</html>
